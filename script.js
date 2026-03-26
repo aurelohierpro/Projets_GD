@@ -1,10 +1,7 @@
 const { Deck, GeoJsonLayer, ScatterplotLayer, _GlobeView } = deck;
 
-const DATA_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/main/countries2.geojson";
-
-const STATS_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/main/stats_site2.json";
+const DATA_URL = "./countries2.geojson";
+const STATS_URL = "./stats_site2.json";
 
 let mode = "projects";
 let hoveredName = null;
