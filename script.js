@@ -512,8 +512,12 @@ function refreshMap() {
   if (!deckgl) return;
   deckgl.setProps({ layers: getLayers() });
   updateLegend();
-  document.getElementById("btnProjects").classList.toggle("active", mode === "projects");
-  document.getElementById("btnAmount").classList.toggle("active", mode === "amount");
+
+  const btnProjects = document.getElementById("btnProjects");
+  const btnAmount = document.getElementById("btnAmount");
+
+  if (btnProjects) btnProjects.classList.toggle("active", mode === "projects");
+  if (btnAmount) btnAmount.classList.toggle("active", mode === "amount");
 }
 
 // ─── Export visibilité ────────────────────────────────────────────────────────
@@ -796,7 +800,7 @@ function exportMapPNG() {
   try {
     croppedCanvas.toBlob(blob => {
       if (!blob) {
-        if (status) status.textContent = "⚠ canvas vide";
+        if (status) status.textContent = "canvas vide";
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -810,112 +814,130 @@ function exportMapPNG() {
         URL.revokeObjectURL(url);
       }, 300);
       if (status) {
-        status.textContent = "✓ Exporté !";
+        status.textContent = "Exporté";
         setTimeout(() => { status.style.display = "none"; }, 2500);
       }
     }, "image/png");
   } catch (e) {
     console.error("Export error:", e);
-    if (status) status.textContent = "⚠ " + e.message;
+    if (status) status.textContent = e.message;
   }
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
-document.getElementById("btnProjects").addEventListener("click", () => {
-  mode = "projects";
-  refreshMap();
-  pauseAutoRotate();
-});
+document.addEventListener("DOMContentLoaded", () => {
+  const btnProjects = document.getElementById("btnProjects");
+  const btnAmount = document.getElementById("btnAmount");
+  const filterTypeSelect = document.getElementById("filterTypeSelect");
+  const btnExport = document.getElementById("btnExport");
 
-document.getElementById("btnAmount").addEventListener("click", () => {
-  mode = "amount";
-  refreshMap();
-  pauseAutoRotate();
-});
-
-document.getElementById("filterTypeSelect").addEventListener("change", e => {
-  filterType = e.target.value;
-  filterValue = "ALL";
-  hoveredName = null;
-  buildFilterValueUI();
-  applyFilterToMap();
-  pauseAutoRotate();
-  updateExportVisibility();
-});
-
-window.addEventListener("load", () => {
-  const btn = document.getElementById("btnExport");
-  if (btn) btn.addEventListener("click", exportMapPNG);
-});
-
-// ─── Stars ────────────────────────────────────────────────────────────────────
-
-(function generateStars() {
-  const container = document.getElementById("stars-container");
-  if (!container) return;
-  const count = 220;
-
-  for (let i = 0; i < count; i++) {
-    const star = document.createElement("div");
-    star.className = "star";
-    const size = Math.random() < 0.8 ? 1 : Math.random() < 0.7 ? 1.5 : 2;
-    const x = Math.random() * 100;
-    const y = Math.random() * 100;
-    const dur = 2.5 + Math.random() * 5;
-    const del = Math.random() * 8;
-    const op = 0.4 + Math.random() * 0.6;
-
-    star.style.cssText = `
-      width:${size}px; height:${size}px;
-      left:${x}%; top:${y}%;
-      --duration:${dur}s; --delay:${del}s; --max-opacity:${op};
-    `;
-
-    container.appendChild(star);
+  if (btnProjects) {
+    btnProjects.addEventListener("click", () => {
+      mode = "projects";
+      refreshMap();
+      pauseAutoRotate();
+    });
   }
-})();
 
-// ─── Load data ────────────────────────────────────────────────────────────────
+  if (btnAmount) {
+    btnAmount.addEventListener("click", () => {
+      mode = "amount";
+      refreshMap();
+      pauseAutoRotate();
+    });
+  }
 
-Promise.all([
-  fetch(DATA_URL).then(r => r.json()),
-  fetch(STATS_URL).then(r => r.json())
-])
-  .then(([geojson, stats]) => {
-    geoFeatures = geojson.features || [];
-    statsData = stats || null;
+  if (filterTypeSelect) {
+    filterTypeSelect.addEventListener("change", e => {
+      filterType = e.target.value;
+      filterValue = "ALL";
+      hoveredName = null;
+      buildFilterValueUI();
+      applyFilterToMap();
+      pauseAutoRotate();
+      updateExportVisibility();
+    });
+  }
 
-    buildFilterValueUI();
-    applyFilterToMap();
-    updateExportVisibility();
+  if (btnExport) {
+    btnExport.addEventListener("click", exportMapPNG);
+  }
 
-    deckgl = new Deck({
-      parent: document.getElementById("container"),
-      views: [new _GlobeView()],
-      controller: true,
-      viewState: currentViewState,
-      layers: getLayers(),
-      onViewStateChange: ({ viewState, interactionState }) => {
-        currentViewState = { ...viewState };
-        if (
-          interactionState.isDragging ||
-          interactionState.isZooming ||
-          interactionState.isRotating
-        ) {
-          pauseAutoRotate();
+  // ─── Stars ──────────────────────────────────────────────────────────────────
+
+  (function generateStars() {
+    const container = document.getElementById("stars-container");
+    if (!container) return;
+    const count = 220;
+
+    for (let i = 0; i < count; i++) {
+      const star = document.createElement("div");
+      star.className = "star";
+      const size = Math.random() < 0.8 ? 1 : Math.random() < 0.7 ? 1.5 : 2;
+      const x = Math.random() * 100;
+      const y = Math.random() * 100;
+      const dur = 2.5 + Math.random() * 5;
+      const del = Math.random() * 8;
+      const op = 0.4 + Math.random() * 0.6;
+
+      star.style.cssText = `
+        width:${size}px; height:${size}px;
+        left:${x}%; top:${y}%;
+        --duration:${dur}s; --delay:${del}s; --max-opacity:${op};
+      `;
+
+      container.appendChild(star);
+    }
+  })();
+
+  // ─── Load data ──────────────────────────────────────────────────────────────
+
+  Promise.all([
+    fetch(DATA_URL).then(r => {
+      if (!r.ok) throw new Error(`countries.geojson introuvable (${r.status})`);
+      return r.json();
+    }),
+    fetch(STATS_URL).then(r => {
+      if (!r.ok) throw new Error(`stats_site.json introuvable (${r.status})`);
+      return r.json();
+    })
+  ])
+    .then(([geojson, stats]) => {
+      geoFeatures = geojson.features || [];
+      statsData = stats || null;
+
+      buildFilterValueUI();
+      applyFilterToMap();
+      updateExportVisibility();
+
+      deckgl = new Deck({
+        parent: document.getElementById("container"),
+        views: [new _GlobeView()],
+        controller: true,
+        viewState: currentViewState,
+        layers: getLayers(),
+        onViewStateChange: ({ viewState, interactionState }) => {
+          currentViewState = { ...viewState };
+          if (
+            interactionState.isDragging ||
+            interactionState.isZooming ||
+            interactionState.isRotating
+          ) {
+            pauseAutoRotate();
+          }
+          if (deckgl) deckgl.setProps({ viewState: currentViewState });
         }
-        if (deckgl) deckgl.setProps({ viewState: currentViewState });
-      }
-    });
+      });
 
-    updateLegend();
-    animateRotation();
-  })
-  .catch(err => {
-    console.error("Erreur chargement données :", err);
-    ["stat-projects", "stat-countries", "stat-amount"].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = "—";
+      updateLegend();
+      animateRotation();
+    })
+    .catch(err => {
+      console.error("Erreur chargement données :", err);
+      ["stat-projects", "stat-countries", "stat-amount"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = "—";
+      });
     });
-  });
+});
