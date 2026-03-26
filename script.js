@@ -203,27 +203,30 @@ function buildFilterValueUI() {
   wrapper.style.display = "block";
 
   if (filterType === "amount") {
-    const maxAmt = Math.max(5000000, ...projectsRows.map(p => Number(p.amount || 0)));
+  const maxAmt = 5000000;
+  const stepAmt = 50000;
 
-    wrapper.innerHTML = `
-      <div class="amount-slider-wrapper">
-        <div class="amount-slider-label">
-          <span>0 EUR</span>
-          <span>${amountShort(maxAmt)}</span>
-        </div>
-        <input
-          type="range"
-          id="amountSlider"
-          min="0"
-          max="${Math.ceil(maxAmt)}"
-          step="50000"
-          value="${filterMinAmount}"
-        />
-        <div class="amount-slider-value" id="amountSliderLabel">
-          ≥ ${amountShort(filterMinAmount)}
-        </div>
+  if (filterMinAmount > maxAmt) filterMinAmount = maxAmt;
+
+  wrapper.innerHTML = `
+    <div class="amount-slider-wrapper">
+      <div class="amount-slider-label">
+        <span>0 EUR</span>
+        <span>5 M EUR</span>
       </div>
-    `;
+      <input
+        type="range"
+        id="amountSlider"
+        min="0"
+        max="${maxAmt}"
+        step="${stepAmt}"
+        value="${filterMinAmount}"
+      />
+      <div class="amount-slider-value" id="amountSliderLabel">
+        ≥ ${amountShort(filterMinAmount)}
+      </div>
+    </div>
+  `;
 
     const slider = document.getElementById("amountSlider");
     if (slider) {
