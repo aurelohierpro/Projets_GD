@@ -1,7 +1,7 @@
 const { Deck, GeoJsonLayer, ScatterplotLayer, _GlobeView } = deck;
 
 const DATA_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/main/projects_globe.geojson";
+  "https://raw.githubusercontent.com/aurelohierpro/Projet_GD/main/projects_globe.geojson";
 
 const EXCEL_URL =
   "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/528c62f4dacb7ceeadf1f31fa92d2899596b0926/awards_all.xlsx";
