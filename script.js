@@ -503,18 +503,19 @@ function updateHalo() {
   const cx = w / 2;
   const cy = h / 2;
 
+  // halo plus serré autour du globe
   const zoomFactor = Math.pow(2, currentViewState.zoom - 1);
-  const radius = (Math.min(w, h) / 2) * zoomFactor * 1.15;
+  const radius = Math.min(w, h) * 0.30 * zoomFactor;
 
-  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-  grad.addColorStop(0, "rgba(120, 190, 255, 0.01)");
-  grad.addColorStop(0.6, "rgba(120, 190, 255, 0.02)");
-  grad.addColorStop(0.78, "rgba(120, 190, 255, 0.05)");
-  grad.addColorStop(0.88, "rgba(120, 190, 255, 0.10)");
-  grad.addColorStop(0.93, "rgba(120, 190, 255, 0.12)");
+  const grad = ctx.createRadialGradient(cx, cy, radius * 0.72, cx, cy, radius);
+
+  grad.addColorStop(0.00, "rgba(120, 190, 255, 0.00)");
+  grad.addColorStop(0.55, "rgba(120, 190, 255, 0.00)");
+  grad.addColorStop(0.72, "rgba(120, 190, 255, 0.03)");
+  grad.addColorStop(0.84, "rgba(120, 190, 255, 0.09)");
+  grad.addColorStop(0.91, "rgba(120, 190, 255, 0.13)");
   grad.addColorStop(0.96, "rgba(120, 190, 255, 0.08)");
-  grad.addColorStop(0.98, "rgba(120, 190, 255, 0.03)");
-  grad.addColorStop(1.0, "rgba(120, 190, 255, 0.0)");
+  grad.addColorStop(1.00, "rgba(120, 190, 255, 0.00)");
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
