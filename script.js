@@ -4,7 +4,7 @@ const DATA_URL =
   "https://raw.githubusercontent.com/aurelohierpro/Projet_GD/main/projects_globe.geojson";
 
 const EXCEL_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/9c2c7913b11673afc0dfde6e3122f1bcf7a54aa7/awards_all.xlsx";
+  "https://raw.githubusercontent.com/aurelohierpro/Projets_GD/main/fea7ca526aa7a030d83d317415072012328f38ec/awards_all.xlsx";
 
 let mode = "projects";
 let hoveredName = null;
