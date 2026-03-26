@@ -1,10 +1,10 @@
 const { Deck, GeoJsonLayer, ScatterplotLayer, _GlobeView } = deck;
 
 const DATA_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/Projets_GD/main/projects_globe.geojson";
+  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/main/countries2.geojson";
 
-const EXCEL_URL =
-  "https://raw.githubusercontent.com/aurelohierpro/Projets_GD/31d884b0053c5340be3cb121ec2e71c526fc5879/awards_all.xlsx";
+const STATS_URL =
+  "https://raw.githubusercontent.com/aurelohierpro/global-dev-globe/main/stats_site2.json";
 
 let mode = "projects";
 let hoveredName = null;
@@ -20,18 +20,10 @@ let currentViewState = {
 
 let filterType = "none";
 let filterValue = "ALL";
-let filterMinAmount = 0;
 
-let excelRows = [];
 let geoFeatures = [];
+let statsData = null;
 let amountBreaks = [0, 0, 0, 0, 0];
-
-const USD_TO_EUR = 0.92;
-
-const FILTER_COLUMNS = {
-  funder: "Origin of Funding (Financing agency)",
-  responsible: "Responsible"
-};
 
 const OFFICE_LOCATIONS = [
   { name: "Paris", coordinates: [2.3522, 48.8566] },
@@ -61,49 +53,11 @@ const PALETTE_BLUE = {
   ]
 };
 
-const PALETTE_ORANGE = {
-  project: [
-    { label: "0", color: [185, 205, 225, 130] },
-    { label: "1", color: [253, 224, 178, 190] },
-    { label: "2–3", color: [253, 187, 99, 200] },
-    { label: "4–5", color: [240, 134, 28, 210] },
-    { label: "6–10", color: [210, 82, 8, 220] },
-    { label: "10+", color: [155, 45, 2, 230] }
-  ],
-  amount: [
-    [185, 205, 225, 110],
-    [253, 224, 178, 190],
-    [253, 187, 99, 200],
-    [240, 134, 28, 210],
-    [210, 82, 8, 220],
-    [155, 45, 2, 230]
-  ]
-};
-
-const PALETTE_GREEN = {
-  project: [
-    { label: "0", color: [185, 205, 225, 130] },
-    { label: "1", color: [198, 239, 210, 190] },
-    { label: "2–3", color: [129, 204, 155, 200] },
-    { label: "4–5", color: [65, 171, 103, 210] },
-    { label: "6–10", color: [30, 130, 65, 220] },
-    { label: "10+", color: [10, 85, 35, 230] }
-  ],
-  amount: [
-    [185, 205, 225, 110],
-    [198, 239, 210, 190],
-    [129, 204, 155, 200],
-    [65, 171, 103, 210],
-    [30, 130, 65, 220],
-    [10, 85, 35, 230]
-  ]
-};
-
 function getActivePalette() {
-  if (filterType === "filiale" && filterValue === "Leader: Urbaconsulting") return PALETTE_ORANGE;
-  if (filterType === "filiale" && filterValue === "Leader: Nexsom") return PALETTE_GREEN;
   return PALETTE_BLUE;
 }
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
 
 function numberFmt(n) {
   return Number(n || 0).toLocaleString("fr-FR");
@@ -117,383 +71,53 @@ function amountShort(n) {
   return numberFmt(v) + " EUR";
 }
 
-function parseMoney(value) {
-  if (value === null || value === undefined || value === "") return 0;
-  if (typeof value === "number") return value;
+// ─── Helpers stats JSON ───────────────────────────────────────────────────────
 
-  const s = String(value).trim();
-  const isUSD = /USD/i.test(s);
+function getCurrentCountryStats() {
+  if (!statsData) return {};
 
-  let clean = s.replace(/[^0-9.,]/g, "");
-
-  if (clean.includes(",") && clean.includes(".")) {
-    clean = clean.replace(/,/g, "");
-  } else if (clean.includes(",") && !clean.includes(".")) {
-    const parts = clean.split(",");
-    if (parts[parts.length - 1].length === 3 && parts.length > 1) {
-      clean = clean.replace(/,/g, "");
-    } else {
-      clean = clean.replace(",", ".");
-    }
+  if (filterType === "none" || filterValue === "ALL") {
+    return statsData.countries_ALL || {};
   }
 
-  const num = parseFloat(clean);
-  if (!Number.isFinite(num) || num === 0) return 0;
+  if (filterType === "funder") {
+    return statsData.funders?.[filterValue]?.countries || {};
+  }
 
-  return isUSD ? Math.round(num * USD_TO_EUR) : num;
+  return statsData.countries_ALL || {};
 }
 
-function getRowAmount(row) {
-  const provided = parseMoney(row["Provided value"]);
-  if (provided > 0) return provided;
-  return parseMoney(row["Overall project value"]);
+function getCurrentTotals() {
+  if (!statsData) {
+    return { projects: 0, amount: 0 };
+  }
+
+  if (filterType === "none" || filterValue === "ALL") {
+    return statsData.totals || { projects: 0, amount: 0 };
+  }
+
+  if (filterType === "funder") {
+    return statsData.funders?.[filterValue]?.totals || { projects: 0, amount: 0 };
+  }
+
+  return statsData.totals || { projects: 0, amount: 0 };
 }
 
-function normalizeText(s) {
-  return String(s || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[''`]/g, "")
-    .replace(/&/g, "and")
-    .replace(/\./g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+function getCurrentNonCountryTotals() {
+  if (!statsData) return {};
+
+  if (filterType === "none" || filterValue === "ALL") {
+    return statsData.non_country_totals || {};
+  }
+
+  if (filterType === "funder") {
+    return statsData.funders?.[filterValue]?.non_country_totals || {};
+  }
+
+  return statsData.non_country_totals || {};
 }
 
-function normalizeCountryName(name) {
-  if (!name) return null;
-
-  let s = String(name).trim();
-  s = s.replace(/\s+/g, " ");
-
-  const aliases = {
-    "Austria": "Austria",
-    "Ethiopia": "Ethiopia",
-    "Angola": "Angola",
-    "Mongolia": "Mongolia",
-    "Ecuador": "Ecuador",
-    "St Vincent & the Grenadines": "St Vincent & the Grenadines",
-    "Demchok": "Demchok",
-    "Denmark": "Denmark",
-    "Namibia": "Namibia",
-    "Lesotho": "Lesotho",
-    "Georgia": "Georgia",
-    "Seychelles": "Seychelles",
-    "Kosovo": "Kosovo",
-    "Switzerland": "Switzerland",
-    "Dominican Republic": "Dominican Republic",
-    "Vatican City": "Vatican City",
-    "Iran": "Iran",
-    "Kalapani": "Kalapani",
-    "Yemen": "Yemen",
-    "Haiti": "Haiti",
-    "Comoros": "Comoros",
-    "Slovenia": "Slovenia",
-    "Central African Rep": "Central African Rep",
-    "Central African Republic": "Central African Rep",
-    "Honduras": "Honduras",
-    "No Man's Land": "No Man's Land",
-    "Finland": "Finland",
-    "CH-IN": "CH-IN",
-    "Armenia": "Armenia",
-    "Spratly Is": "Spratly Is",
-    "Guinea": "Guinea",
-    "Benin": "Benin",
-    "Cabo Verde": "Cabo Verde",
-    "Cape Verde": "Cabo Verde",
-    "Samoa": "Samoa",
-    "Paraguay": "Paraguay",
-    "Chad": "Chad",
-    "Vietnam": "Vietnam",
-    "Bangladesh": "Bangladesh",
-    "Slovakia": "Slovakia",
-    "Germany": "Germany",
-    "Burundi": "Burundi",
-    "Kenya": "Kenya",
-    "Somalia": "Somalia",
-    "Andorra": "Andorra",
-    "Togo": "Togo",
-    "India": "India",
-    "Nepal": "Nepal",
-    "Egypt": "Egypt",
-    "Belize": "Belize",
-    "Palau": "Palau",
-    "Siachen-Saltoro": "Siachen-Saltoro",
-    "Kiribati": "Kiribati",
-    "Philippines": "Philippines",
-    "Morocco": "Morocco",
-    "Greece": "Greece",
-    "Turkmenistan": "Turkmenistan",
-    "Moldova": "Moldova",
-    "Cuba": "Cuba",
-    "Jordan": "Jordan",
-    "Sao Tome & Principe": "Sao Tome & Principe",
-    "Sao Tome and Principe": "Sao Tome & Principe",
-    "Costa Rica": "Costa Rica",
-    "Guatemala": "Guatemala",
-    "Lithuania": "Lithuania",
-    "Eritrea": "Eritrea",
-    "Malta": "Malta",
-    "West Bank": "West Bank",
-    "Gaza Strip": "Gaza Strip",
-    "Palestine / West Bank & Gaza": "West Bank",
-    "Pakistan": "Pakistan",
-    "Timor-Leste": "Timor-Leste",
-    "Greenland": "Greenland",
-    "Canada": "Canada",
-    "Djibouti": "Djibouti",
-    "Thailand": "Thailand",
-    "Marshall Is": "Marshall Is",
-    "Sweden": "Sweden",
-    "Brunei": "Brunei",
-    "Laos": "Laos",
-    "Bulgaria": "Bulgaria",
-    "Syria": "Syria",
-    "Isla Brasilera": "Isla Brasilera",
-    "Uruguay": "Uruguay",
-    "Croatia": "Croatia",
-    "United Arab Emirates": "United Arab Emirates",
-    "Azerbaijan": "Azerbaijan",
-    "Gambia, The": "Gambia, The",
-    "The Gambia": "Gambia, The",
-    "Gambia": "Gambia, The",
-    "Rwanda": "Rwanda",
-    "Qatar": "Qatar",
-    "Sierra Leone": "Sierra Leone",
-    "Taiwan": "Taiwan",
-    "Mauritius": "Mauritius",
-    "Nauru": "Nauru",
-    "Gabon": "Gabon",
-    "Poland": "Poland",
-    "Zambia": "Zambia",
-    "Jamaica": "Jamaica",
-    "Singapore": "Singapore",
-    "Tanzania": "Tanzania",
-    "Congo, Dem Rep of the": "Congo, Dem Rep of the",
-    "Dem. Rep. Congo": "Congo, Dem Rep of the",
-    "Dem Rep Congo": "Congo, Dem Rep of the",
-    "DR Congo": "Congo, Dem Rep of the",
-    "Congo, Democratic Republic of the": "Congo, Dem Rep of the",
-    "Barbados": "Barbados",
-    "Dominica": "Dominica",
-    "Malaysia": "Malaysia",
-    "San Marino": "San Marino",
-    "Sanafir & Tiran Is.": "Sanafir & Tiran Is.",
-    "Brazil": "Brazil",
-    "Bahrain": "Bahrain",
-    "Cyprus": "Cyprus",
-    "Bahamas, The": "Bahamas, The",
-    "Bahamas": "Bahamas, The",
-    "Senkakus": "Senkakus",
-    "Western Sahara": "Western Sahara",
-    "Maldives": "Maldives",
-    "Ukraine": "Ukraine",
-    "Kazakhstan": "Kazakhstan",
-    "Colombia": "Colombia",
-    "Luxembourg": "Luxembourg",
-    "New Zealand": "New Zealand",
-    "Monaco": "Monaco",
-    "Congo, Rep of the": "Congo, Rep of the",
-    "Congo": "Congo, Rep of the",
-    "Republic of the Congo": "Congo, Rep of the",
-    "Antarctica": "Antarctica",
-    "Chile": "Chile",
-    "Dramana-Shakatoe": "Dramana-Shakatoe",
-    "Sudan": "Sudan",
-    "Dragonja": "Dragonja",
-    "South Africa": "South Africa",
-    "Australia": "Australia",
-    "United States": "United States",
-    "Belarus": "Belarus",
-    "Liancourt Rocks": "Liancourt Rocks",
-    "Iraq": "Iraq",
-    "Cambodia": "Cambodia",
-    "Tonga": "Tonga",
-    "Uzbekistan": "Uzbekistan",
-    "Belgium": "Belgium",
-    "Mauritania": "Mauritania",
-    "Tunisia": "Tunisia",
-    "Oman": "Oman",
-    "Kuwait": "Kuwait",
-    "Netherlands": "Netherlands",
-    "Norway": "Norway",
-    "Russia": "Russia",
-    "Saudi Arabia": "Saudi Arabia",
-    "Bosnia & Herzegovina": "Bosnia & Herzegovina",
-    "Hungary": "Hungary",
-    "Macedonia": "Macedonia",
-    "North Macedonia": "Macedonia",
-    "Niger": "Niger",
-    "Solomon Is": "Solomon Is",
-    "Italy": "Italy",
-    "Bolivia": "Bolivia",
-    "Afghanistan": "Afghanistan",
-    "Burkina Faso": "Burkina Faso",
-    "Mexico": "Mexico",
-    "Grenada": "Grenada",
-    "Tuvalu": "Tuvalu",
-    "Fiji": "Fiji",
-    "Liberia": "Liberia",
-    "Liechtenstein": "Liechtenstein",
-    "Swaziland": "Swaziland",
-    "Eswatini (Swaziland)": "Swaziland",
-    "Eswatini": "Swaziland",
-    "Czechia": "Czechia",
-    "Micronesia, Fed States of": "Micronesia, Fed States of",
-    "Micronesia": "Micronesia, Fed States of",
-    "Malawi": "Malawi",
-    "Ghana": "Ghana",
-    "Libya": "Libya",
-    "Lebanon": "Lebanon",
-    "Abyei": "Abyei",
-    "Albania": "Albania",
-    "Korea, North": "Korea, North",
-    "North Korea": "Korea, North",
-    "Panama": "Panama",
-    "Nigeria": "Nigeria",
-    "Guyana": "Guyana",
-    "Uganda": "Uganda",
-    "Sri Lanka": "Sri Lanka",
-    "Tajikistan": "Tajikistan",
-    "Estonia": "Estonia",
-    "Equatorial Guinea": "Equatorial Guinea",
-    "Venezuela": "Venezuela",
-    "Peru": "Peru",
-    "Koualou": "Koualou",
-    "Mali": "Mali",
-    "Turkey": "Turkey",
-    "Iceland": "Iceland",
-    "Papua New Guinea": "Papua New Guinea",
-    "Kyrgyzstan": "Kyrgyzstan",
-    "Spain": "Spain",
-    "France": "France",
-    "Nicaragua": "Nicaragua",
-    "Montenegro": "Montenegro",
-    "St Kitts & Nevis": "St Kitts & Nevis",
-    "Cote d'Ivoire": "Cote d'Ivoire",
-    "Côte d'Ivoire": "Cote d'Ivoire",
-    "Ivory Coast": "Cote d'Ivoire",
-    "Guinea-Bissau": "Guinea-Bissau",
-    "Indonesia": "Indonesia",
-    "Mozambique": "Mozambique",
-    "Zimbabwe": "Zimbabwe",
-    "China": "China",
-    "Serbia": "Serbia",
-    "Aksai Chin": "Aksai Chin",
-    "Algeria": "Algeria",
-    "Ireland": "Ireland",
-    "Falkland Islands (UK)": "Falkland Islands (UK)",
-    "Botswana": "Botswana",
-    "El Salvador": "El Salvador",
-    "Argentina": "Argentina",
-    "South Sudan": "South Sudan",
-    "Bhutan": "Bhutan",
-    "Japan": "Japan",
-    "Senegal": "Senegal",
-    "Antigua & Barbuda": "Antigua & Barbuda",
-    "Romania": "Romania",
-    "Trinidad & Tobago": "Trinidad & Tobago",
-    "Burma": "Burma",
-    "Myanmar": "Burma",
-    "Paracel Is": "Paracel Is",
-    "United Kingdom": "United Kingdom",
-    "UK": "United Kingdom",
-    "St Lucia": "St Lucia",
-    "Vanuatu": "Vanuatu",
-    "Korea, South": "Korea, South",
-    "South Korea": "Korea, South",
-    "Latvia": "Latvia",
-    "Suriname": "Suriname",
-    "Israel": "Israel",
-    "Portugal": "Portugal",
-    "Madagascar": "Madagascar",
-    "Cameroon": "Cameroon",
-    "Mayotte": "Mayotte",
-    "Martinique": "Martinique",
-    "French Guiana": "French Guiana",
-    "Guadeloupe": "Guadeloupe"
-  };
-
-  const nonCountries = new Set([
-    "Africa",
-    "Asia",
-    "Oceania",
-    "Worldwide",
-    "Latin America and the Caribbean",
-    "EU 27",
-    "Europe Non EU 27",
-    "Northern America"
-  ]);
-
-  if (nonCountries.has(s)) return null;
-  return aliases[s] || s;
-}
-
-function splitValues(value) {
-  if (!value) return [];
-  return String(value).split(",").map(v => v.trim()).filter(Boolean);
-}
-
-function getUniqueValues(col) {
-  const set = new Set();
-  excelRows.forEach(row => {
-    const hasData = Object.values(row).some(v => v !== null && String(v).trim() !== "");
-    if (!hasData) return;
-    const raw = String(row[col] || "").trim();
-    if (raw) set.add(raw);
-  });
-  return [...set].sort((a, b) => a.localeCompare(b, "fr"));
-}
-
-function getUniqueMultiValues(col) {
-  const set = new Set();
-  excelRows.forEach(row => {
-    const hasData = Object.values(row).some(v => v !== null && String(v).trim() !== "");
-    if (!hasData) return;
-    splitValues(row[col]).forEach(v => {
-      if (v) set.add(v);
-    });
-  });
-  return [...set].sort((a, b) => a.localeCompare(b, "fr"));
-}
-
-function getFilteredRows() {
-  return excelRows.filter(row => {
-    const hasData = Object.values(row).some(v => v !== null && String(v).trim() !== "");
-    if (!hasData) return false;
-    if (filterType === "none") return true;
-
-    if (filterType === "amount") {
-      return getRowAmount(row) >= filterMinAmount;
-    }
-
-    if (filterType === "filiale") {
-      if (filterValue === "ALL") return true;
-      const members = String(row["Consortium members"] || "").trim();
-      const leaderName = filterValue.replace("Leader: ", "").toLowerCase();
-      const firstMember = members.split(",")[0].trim().toLowerCase();
-      return firstMember.includes(leaderName);
-    }
-
-    if (filterType === "sector") {
-      if (filterValue === "ALL") return true;
-      const sectors = splitValues(row["Sectors"]);
-      return sectors.some(s => s.trim() === filterValue);
-    }
-
-    if (filterType === "expert") {
-      if (filterValue === "ALL") return true;
-      const experts = splitValues(row["Experts"]);
-      return experts.some(e => e.trim() === filterValue);
-    }
-
-    const col = FILTER_COLUMNS[filterType];
-    if (!col) return true;
-    if (filterValue === "ALL") return true;
-    return String(row[col] || "").trim() === filterValue;
-  });
-}
+// ─── Dynamic filter UI ────────────────────────────────────────────────────────
 
 function buildFilterValueUI() {
   const wrapper = document.getElementById("filterValueWrapper");
@@ -505,116 +129,46 @@ function buildFilterValueUI() {
     return;
   }
 
+  if (filterType !== "funder") {
+    wrapper.style.display = "none";
+    wrapper.innerHTML = "";
+    return;
+  }
+
   wrapper.style.display = "block";
 
-  if (filterType === "amount") {
-    const maxAmt = 5000000;
-    const step = 50000;
-    wrapper.innerHTML = `
-      <div class="amount-slider-wrapper">
-        <div class="amount-slider-label">
-          <span>0 EUR</span>
-          <span>5 M EUR</span>
-        </div>
-        <input type="range" id="amountSlider"
-          min="0" max="${maxAmt}" step="${step}" value="${filterMinAmount}" />
-        <div class="amount-slider-value" id="amountSliderLabel">
-          ≥ ${amountShort(filterMinAmount)}
-        </div>
-      </div>
-    `;
-    document.getElementById("amountSlider").addEventListener("input", e => {
-      filterMinAmount = Number(e.target.value);
-      document.getElementById("amountSliderLabel").textContent = "≥ " + amountShort(filterMinAmount);
-      applyFilterToMap();
-      pauseAutoRotate();
-    });
-    return;
-  }
-
-  if (filterType === "filiale") {
-    const select = document.createElement("select");
-    select.id = "filterValueSelect";
-    const options = [
-      { value: "ALL", label: "Toutes les filiales" },
-      { value: "Leader: Hydroconseil", label: "Leader : Hydroconseil" },
-      { value: "Leader: Urbaconsulting", label: "Leader : Urbaconsulting" },
-      { value: "Leader: Nexsom", label: "Leader : Nexsom" }
-    ];
-    options.forEach(({ value, label }) => {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
-      select.appendChild(opt);
-    });
-    select.value = ["Leader: Hydroconseil", "Leader: Urbaconsulting", "Leader: Nexsom"].includes(filterValue)
-      ? filterValue
-      : "ALL";
-    wrapper.innerHTML = "";
-    wrapper.appendChild(select);
-    select.addEventListener("change", e => {
-      filterValue = e.target.value;
-      applyFilterToMap();
-      pauseAutoRotate();
-    });
-    return;
-  }
-
-  if (filterType === "sector" || filterType === "expert") {
-    const col = filterType === "sector" ? "Sectors" : "Experts";
-    const values = getUniqueMultiValues(col);
-    const select = document.createElement("select");
-    select.id = "filterValueSelect";
-
-    const allOpt = document.createElement("option");
-    allOpt.value = "ALL";
-    allOpt.textContent = filterType === "sector" ? "Tous les secteurs" : "Tous les experts";
-    select.appendChild(allOpt);
-
-    values.forEach(v => {
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v;
-      select.appendChild(opt);
-    });
-
-    select.value = values.includes(filterValue) ? filterValue : "ALL";
-    wrapper.innerHTML = "";
-    wrapper.appendChild(select);
-    select.addEventListener("change", e => {
-      filterValue = e.target.value;
-      applyFilterToMap();
-      pauseAutoRotate();
-    });
-    return;
-  }
-
-  const col = FILTER_COLUMNS[filterType];
-  const values = getUniqueValues(col);
   const select = document.createElement("select");
   select.id = "filterValueSelect";
 
   const allOpt = document.createElement("option");
   allOpt.value = "ALL";
-  allOpt.textContent = "Toutes les valeurs";
+  allOpt.textContent = "Tous les bailleurs";
   select.appendChild(allOpt);
 
-  values.forEach(v => {
+  const funders = statsData?.funders_ordered_for_filter || [];
+  funders.forEach(({ name, count_rows }) => {
     const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = v;
+    opt.value = name;
+    opt.textContent = `${name} (${count_rows})`;
     select.appendChild(opt);
   });
 
-  select.value = values.includes(filterValue) ? filterValue : "ALL";
+  const funderNames = funders.map(f => f.name);
+  select.value = funderNames.includes(filterValue) ? filterValue : "ALL";
+  filterValue = select.value;
+
   wrapper.innerHTML = "";
   wrapper.appendChild(select);
+
   select.addEventListener("change", e => {
     filterValue = e.target.value;
+    hoveredName = null;
     applyFilterToMap();
     pauseAutoRotate();
   });
 }
+
+// ─── Colors ───────────────────────────────────────────────────────────────────
 
 function computeAmountBreaks(values) {
   const arr = values.filter(v => v > 0).sort((a, b) => a - b);
@@ -643,18 +197,11 @@ function getAmountColor(v) {
   return palette[5];
 }
 
-function getResponsableColor(v) {
-  if (!v || v <= 0) return [185, 205, 225, 110];
-  return [49, 130, 189, 220];
-}
-
 function getFillColor(props) {
-  const isHovered = hoveredName && props.shapeName === hoveredName;
+  const isHovered = hoveredName && props.country_name === hoveredName;
   let color;
 
-  if (filterType === "responsible" && filterValue !== "ALL") {
-    color = getResponsableColor(Number(props.nb_projets || 0));
-  } else if (mode === "projects") {
+  if (mode === "projects") {
     color = getProjectColor(Number(props.nb_projets || 0));
   } else {
     color = getAmountColor(Number(props.somme_argent || 0));
@@ -675,6 +222,8 @@ function getFillColor(props) {
 function getElevation(v) {
   return !v || v < 1 ? 0 : 5000;
 }
+
+// ─── Earth background layer ───────────────────────────────────────────────────
 
 function makeEarthLayer() {
   return new GeoJsonLayer({
@@ -705,6 +254,8 @@ function makeEarthLayer() {
   });
 }
 
+// ─── Countries fill layer ─────────────────────────────────────────────────────
+
 function makeCountriesFillLayer() {
   return new GeoJsonLayer({
     id: "countries-fill",
@@ -731,19 +282,23 @@ function makeCountriesFillLayer() {
     parameters: { depthTest: true, cullFace: "back" },
     updateTriggers: {
       getFillColor: [
-        mode, hoveredName,
-        filterType, filterValue, filterMinAmount,
+        mode,
+        hoveredName,
+        filterType,
+        filterValue,
         amountBreaks.join("-")
       ],
-      getElevation: [mode, filterType, filterValue, filterMinAmount]
+      getElevation: [mode, filterType, filterValue]
     },
     onHover: info => {
-      hoveredName = info.object ? info.object.properties.shapeName : null;
+      hoveredName = info.object ? info.object.properties.country_name : null;
       updateTooltip(info);
       if (deckgl) deckgl.setProps({ layers: getLayers() });
     }
   });
 }
+
+// ─── Countries border layer ───────────────────────────────────────────────────
 
 function makeCountriesBorderLayer() {
   return new GeoJsonLayer({
@@ -754,12 +309,11 @@ function makeCountriesBorderLayer() {
     extruded: false,
     pickable: false,
     getLineColor: f => {
-      const isHovered = hoveredName && f.properties.shapeName === hoveredName;
+      const isHovered = hoveredName && f.properties.country_name === hoveredName;
       return isHovered ? [255, 255, 255, 255] : [255, 255, 255, 160];
     },
-    getLineWidth: f => (
-      hoveredName && f.properties.shapeName === hoveredName ? 1 : 0
-    ),
+    getLineWidth: f =>
+      hoveredName && f.properties.country_name === hoveredName ? 1 : 0,
     lineWidthUnits: "pixels",
     lineWidthMinPixels: 0.5,
     parameters: { depthTest: false, cullFace: "back" },
@@ -769,6 +323,8 @@ function makeCountriesBorderLayer() {
     }
   });
 }
+
+// ─── Office locations layer ───────────────────────────────────────────────────
 
 function makeOfficesLayer() {
   const pulse = 0.5 + 0.5 * Math.sin(pulsePhase);
@@ -802,6 +358,8 @@ function makeOfficesLayer() {
   ];
 }
 
+// ─── Layers helper ────────────────────────────────────────────────────────────
+
 function getLayers() {
   return [
     makeEarthLayer(),
@@ -810,6 +368,8 @@ function getLayers() {
     ...makeOfficesLayer()
   ];
 }
+
+// ─── Halo ─────────────────────────────────────────────────────────────────────
 
 function updateHalo() {
   const container = document.getElementById("container");
@@ -827,6 +387,7 @@ function updateHalo() {
 
   const cx = w / 2;
   const cy = h / 2;
+
   const zoomFactor = Math.pow(2, currentViewState.zoom - 1);
   const radius = (Math.min(w, h) / 2) * zoomFactor * 1.15;
 
@@ -844,27 +405,14 @@ function updateHalo() {
   ctx.fillRect(0, 0, w, h);
 }
 
+// ─── Legend ───────────────────────────────────────────────────────────────────
+
 function updateLegend() {
   const title = document.getElementById("legendTitle");
   const box = document.getElementById("legendItems");
   if (!title || !box) return;
 
   box.innerHTML = "";
-
-  if (filterType === "responsible" && filterValue !== "ALL") {
-    title.textContent = "";
-    const items = [{ label: "Pays d'expérience", color: [49, 130, 189, 220] }];
-    items.forEach(({ label, color }) => {
-      const row = document.createElement("div");
-      row.className = "legend-row";
-      row.innerHTML = `
-        <div class="legend-swatch" style="background:rgba(${color[0]},${color[1]},${color[2]},${color[3] / 255});"></div>
-        <div>${label}</div>`;
-      box.appendChild(row);
-    });
-    return;
-  }
-
   const palette = getActivePalette();
 
   if (mode === "projects") {
@@ -898,34 +446,28 @@ function updateLegend() {
   }
 }
 
-function updateStatsCards(filteredRows, features) {
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+function updateStatsCards(features) {
   const coveredCountries = features.filter(
     f => Number(f.properties.nb_projets || 0) > 0
   ).length;
 
-  const elCountries = document.getElementById("stat-countries");
-  const elProjects = document.getElementById("stat-projects");
-  const elAmount = document.getElementById("stat-amount");
+  const totals = getCurrentTotals();
 
-  let totalAmount = 0;
-  filteredRows.forEach(row => {
-    totalAmount += getRowAmount(row);
-  });
+  document.getElementById("stat-countries").textContent = numberFmt(coveredCountries);
+  document.getElementById("stat-projects").textContent = numberFmt(totals.projects || 0);
 
-  if (elCountries) elCountries.textContent = numberFmt(coveredCountries);
-  if (elProjects) elProjects.textContent = numberFmt(filteredRows.length);
-  if (elAmount) {
-    elAmount.textContent = (totalAmount / 1e6).toLocaleString("fr-FR", {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1
-    }) + " M €";
-  }
+  const totalAmountMEur = Math.round((totals.amount || 0) / 1000000);
+  document.getElementById("stat-amount").textContent =
+    totalAmountMEur.toLocaleString("fr-FR") + " M €";
 }
+
+// ─── Tooltip ──────────────────────────────────────────────────────────────────
 
 function updateTooltip(info) {
   const tooltip = document.getElementById("tooltip");
   if (!tooltip) return;
-
   if (!info.object) {
     tooltip.style.display = "none";
     return;
@@ -934,7 +476,7 @@ function updateTooltip(info) {
   const props = info.object.properties;
   tooltip.innerHTML = `
     <div style="font-size:14px;font-weight:700;margin-bottom:6px;color:#ffffff;">
-      ${props.shapeName || "Pays"}
+      ${props.country_name || "Pays"}
     </div>
     <div style="font-size:12px;line-height:1.55;color:#edf6ff;">
       <span style="color:#b9d8f5;">Nombre de projets :</span>
@@ -942,47 +484,30 @@ function updateTooltip(info) {
       <span style="color:#b9d8f5;">Montant cumulé :</span>
       <b style="color:#ffffff;">${numberFmt(props.somme_argent || 0)} EUR</b>
     </div>`;
+
   tooltip.style.left = `${info.x + 16}px`;
   tooltip.style.top = `${info.y + 16}px`;
   tooltip.style.display = "block";
 }
 
-function buildCountryStatsFromRows(rows) {
-  const stats = {};
-
-  rows.forEach(row => {
-    const countries = splitValues(row["Assignment locations"]);
-    const amount = getRowAmount(row);
-
-    countries.forEach(country => {
-      const key = normalizeCountryName(country);
-      if (!key) return;
-
-      if (!stats[key]) stats[key] = { nb_projets: 0, somme_argent: 0 };
-      stats[key].nb_projets += 1;
-      stats[key].somme_argent += amount;
-    });
-  });
-
-  return stats;
-}
+// ─── Apply filter to map ──────────────────────────────────────────────────────
 
 function applyFilterToMap() {
-  const filteredRows = getFilteredRows();
-  const statsByCountry = buildCountryStatsFromRows(filteredRows);
+  const statsByCountry = getCurrentCountryStats();
 
   geoFeatures.forEach(f => {
-    const key = normalizeCountryName(f.properties.shapeName || "");
-    const stats = statsByCountry[key] || { nb_projets: 0, somme_argent: 0 };
-    f.properties.nb_projets = stats.nb_projets;
-    f.properties.somme_argent = Math.round(stats.somme_argent);
+    const key = f.properties.country_key;
+    const stats = statsByCountry[key] || { nb_projets: 0, montant: 0 };
+
+    f.properties.nb_projets = Number(stats.nb_projets || 0);
+    f.properties.somme_argent = Math.round(Number(stats.montant || 0));
   });
 
   amountBreaks = computeAmountBreaks(
     geoFeatures.map(f => Number(f.properties.somme_argent || 0))
   );
 
-  updateStatsCards(filteredRows, geoFeatures);
+  updateStatsCards(geoFeatures);
   refreshMap();
 }
 
@@ -990,32 +515,28 @@ function refreshMap() {
   if (!deckgl) return;
   deckgl.setProps({ layers: getLayers() });
   updateLegend();
-
-  const btnProjects = document.getElementById("btnProjects");
-  const btnAmount = document.getElementById("btnAmount");
-
-  if (btnProjects) btnProjects.classList.toggle("active", mode === "projects");
-  if (btnAmount) btnAmount.classList.toggle("active", mode === "amount");
+  document.getElementById("btnProjects").classList.toggle("active", mode === "projects");
+  document.getElementById("btnAmount").classList.toggle("active", mode === "amount");
 }
+
+// ─── Export visibilité ────────────────────────────────────────────────────────
 
 function updateExportVisibility() {
   const exportPanel = document.getElementById("ui-export");
   if (!exportPanel) return;
-  const hide = filterType === "amount" || filterType === "responsible";
-  exportPanel.style.display = hide ? "none" : "block";
+  exportPanel.style.display = "block";
 }
+
+// ─── Auto-rotate ──────────────────────────────────────────────────────────────
 
 function pauseAutoRotate() {
   autoRotate = false;
   if (resumeRotateTimeout) clearTimeout(resumeRotateTimeout);
-  resumeRotateTimeout = setTimeout(() => {
-    autoRotate = true;
-  }, 1000);
+  resumeRotateTimeout = setTimeout(() => { autoRotate = true; }, 1000);
 }
 
 function animateRotation() {
   if (!deckgl) return;
-
   pulsePhase += 0.04;
   updateHalo();
 
@@ -1030,6 +551,8 @@ function animateRotation() {
   requestAnimationFrame(animateRotation);
 }
 
+// ─── Export PNG ───────────────────────────────────────────────────────────────
+
 function exportMapPNG() {
   const status = document.getElementById("exportStatus");
   if (status) {
@@ -1038,11 +561,11 @@ function exportMapPNG() {
   }
 
   const ROB = [
-    [0, 1.0000, 0.0000], [5, 0.9986, 0.0620], [10, 0.9954, 0.1240], [15, 0.9900, 0.1860],
-    [20, 0.9822, 0.2480], [25, 0.9730, 0.3100], [30, 0.9600, 0.3720], [35, 0.9427, 0.4340],
-    [40, 0.9216, 0.4958], [45, 0.8962, 0.5571], [50, 0.8679, 0.6176], [55, 0.8350, 0.6769],
-    [60, 0.7986, 0.7346], [65, 0.7597, 0.7903], [70, 0.7186, 0.8435], [75, 0.6732, 0.8936],
-    [80, 0.6213, 0.9394], [85, 0.5722, 0.9761], [90, 0.5322, 1.0000]
+    [0,1.0000,0.0000],[5,0.9986,0.0620],[10,0.9954,0.1240],[15,0.9900,0.1860],
+    [20,0.9822,0.2480],[25,0.9730,0.3100],[30,0.9600,0.3720],[35,0.9427,0.4340],
+    [40,0.9216,0.4958],[45,0.8962,0.5571],[50,0.8679,0.6176],[55,0.8350,0.6769],
+    [60,0.7986,0.7346],[65,0.7597,0.7903],[70,0.7186,0.8435],[75,0.6732,0.8936],
+    [80,0.6213,0.9394],[85,0.5722,0.9761],[90,0.5322,1.0000]
   ];
 
   function robInterp(lat) {
@@ -1122,40 +645,20 @@ function exportMapPNG() {
   let mapTitle = "Projets de Global Development";
   if (filterType === "funder" && filterValue !== "ALL") {
     mapTitle = `Projets avec ${filterValue}`;
-  } else if (filterType === "responsible" && filterValue !== "ALL") {
-    mapTitle = `Projets de ${filterValue}`;
-  } else if (filterType === "filiale" && filterValue === "Leader: Hydroconseil") {
-    mapTitle = "Projets de la filiale Hydroconseil";
-  } else if (filterType === "filiale" && filterValue === "Leader: Urbaconsulting") {
-    mapTitle = "Projets de la filiale Urbaconsulting";
-  } else if (filterType === "filiale" && filterValue === "Leader: Nexsom") {
-    mapTitle = "Projets de la filiale Nexsom";
-  } else if (filterType === "sector" && filterValue !== "ALL") {
-    mapTitle = `Projets secteur : ${filterValue}`;
-  } else if (filterType === "expert" && filterValue !== "ALL") {
-    mapTitle = `Projets de l'expert ${filterValue}`;
-  } else if (filterType === "amount" && filterMinAmount > 0) {
-    mapTitle = `Projets ≥ ${amountShort(filterMinAmount)}`;
   }
 
-  const isOrange = filterType === "filiale" && filterValue === "Leader: Urbaconsulting";
-  const isGreen = filterType === "filiale" && filterValue === "Leader: Nexsom";
   const COLOR_EMPTY = [208, 218, 228, 110];
 
   function getExportFillColor(props) {
     let color;
-
-    if (filterType === "responsible" && filterValue !== "ALL") {
-      const v = Number(props.nb_projets || 0);
-      color = v <= 0 ? COLOR_EMPTY : [49, 130, 189, 220];
-    } else if (mode === "projects") {
+    if (mode === "projects") {
       const v = Number(props.nb_projets || 0);
       if (!v || v <= 0) color = COLOR_EMPTY;
-      else if (v <= 1) color = isOrange ? [253, 224, 178, 210] : isGreen ? [198, 239, 210, 210] : [180, 210, 235, 210];
-      else if (v <= 3) color = isOrange ? [253, 187, 99, 220] : isGreen ? [129, 204, 155, 220] : [130, 180, 220, 220];
-      else if (v <= 5) color = isOrange ? [240, 134, 28, 230] : isGreen ? [65, 171, 103, 230] : [80, 145, 200, 230];
-      else if (v <= 10) color = isOrange ? [210, 82, 8, 240] : isGreen ? [30, 130, 65, 240] : [35, 100, 170, 240];
-      else color = isOrange ? [155, 45, 2, 255] : isGreen ? [10, 85, 35, 255] : [8, 60, 130, 255];
+      else if (v <= 1) color = [180, 210, 235, 210];
+      else if (v <= 3) color = [130, 180, 220, 220];
+      else if (v <= 5) color = [80, 145, 200, 230];
+      else if (v <= 10) color = [35, 100, 170, 240];
+      else color = [8, 60, 130, 255];
     } else {
       const v = Number(props.somme_argent || 0);
       const p = getActivePalette().amount;
@@ -1166,7 +669,6 @@ function exportMapPNG() {
       else if (v <= amountBreaks[3]) color = p[4];
       else color = p[5];
     }
-
     return color;
   }
 
@@ -1182,21 +684,17 @@ function exportMapPNG() {
 
   geoFeatures.forEach(f => {
     const color = getExportFillColor(f.properties);
-    const isEmpty =
-      color[0] === COLOR_EMPTY[0] &&
-      color[1] === COLOR_EMPTY[1] &&
-      color[2] === COLOR_EMPTY[2];
+    const isEmpty = color[0] === COLOR_EMPTY[0] &&
+                    color[1] === COLOR_EMPTY[1] &&
+                    color[2] === COLOR_EMPTY[2];
 
     ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${(color[3] || 255) / 255})`;
     ctx.strokeStyle = isEmpty ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.55)";
     ctx.lineWidth = isEmpty ? 1.5 : 0.4;
 
     const geom = f.geometry;
-    const polys = geom.type === "Polygon"
-      ? [geom.coordinates]
-      : geom.type === "MultiPolygon"
-        ? geom.coordinates
-        : [];
+    const polys = geom.type === "Polygon" ? [geom.coordinates]
+      : geom.type === "MultiPolygon" ? geom.coordinates : [];
 
     polys.forEach(poly => {
       poly.forEach(ring => {
@@ -1231,24 +729,17 @@ function exportMapPNG() {
   ctx.fillText(mapTitle, centerX, TEXT_TOP + FS_T);
 
   const palette = getActivePalette();
+  const legendTitle = mode === "projects" ? "Nombre de projets" : "Montant cumulé";
   let legendItems = [];
-  const legendTitle = (filterType === "responsible" && filterValue !== "ALL")
-    ? "Présence"
-    : mode === "projects" ? "Nombre de projets" : "Montant cumulé";
 
-  if (filterType === "responsible" && filterValue !== "ALL") {
-    legendItems = [
-      { label: "Aucun projet", color: COLOR_EMPTY },
-      { label: "≥ 1 projet", color: [49, 130, 189, 220] }
-    ];
-  } else if (mode === "projects") {
+  if (mode === "projects") {
     legendItems = [
       { label: "0", color: COLOR_EMPTY },
-      { label: "1", color: isOrange ? [253, 224, 178, 210] : isGreen ? [198, 239, 210, 210] : [180, 210, 235, 210] },
-      { label: "2–3", color: isOrange ? [253, 187, 99, 220] : isGreen ? [129, 204, 155, 220] : [130, 180, 220, 220] },
-      { label: "4–5", color: isOrange ? [240, 134, 28, 230] : isGreen ? [65, 171, 103, 230] : [80, 145, 200, 230] },
-      { label: "6–10", color: isOrange ? [210, 82, 8, 240] : isGreen ? [30, 130, 65, 240] : [35, 100, 170, 240] },
-      { label: "10+", color: isOrange ? [155, 45, 2, 255] : isGreen ? [10, 85, 35, 255] : [8, 60, 130, 255] }
+      { label: "1", color: [180, 210, 235, 210] },
+      { label: "2–3", color: [130, 180, 220, 220] },
+      { label: "4–5", color: [80, 145, 200, 230] },
+      { label: "6–10", color: [35, 100, 170, 240] },
+      { label: "10+", color: [8, 60, 130, 255] }
     ];
   } else {
     legendItems = palette.amount.map((color, i) => ({
@@ -1308,81 +799,69 @@ function exportMapPNG() {
   try {
     croppedCanvas.toBlob(blob => {
       if (!blob) {
-        if (status) status.textContent = "canvas vide";
+        if (status) status.textContent = "⚠ canvas vide";
         return;
       }
-
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = `projet_gd_${new Date().toISOString().slice(0, 10)}.png`;
       document.body.appendChild(link);
       link.click();
-
       setTimeout(() => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       }, 300);
-
       if (status) {
-        status.textContent = "Exporté";
-        setTimeout(() => {
-          status.style.display = "none";
-        }, 2500);
+        status.textContent = "✓ Exporté !";
+        setTimeout(() => { status.style.display = "none"; }, 2500);
       }
     }, "image/png");
   } catch (e) {
     console.error("Export error:", e);
-    if (status) status.textContent = e.message;
+    if (status) status.textContent = "⚠ " + e.message;
   }
 }
 
-const btnProjectsEl = document.getElementById("btnProjects");
-if (btnProjectsEl) {
-  btnProjectsEl.addEventListener("click", () => {
-    mode = "projects";
-    refreshMap();
-    pauseAutoRotate();
-  });
-}
+// ─── Event listeners ──────────────────────────────────────────────────────────
 
-const btnAmountEl = document.getElementById("btnAmount");
-if (btnAmountEl) {
-  btnAmountEl.addEventListener("click", () => {
-    mode = "amount";
-    refreshMap();
-    pauseAutoRotate();
-  });
-}
+document.getElementById("btnProjects").addEventListener("click", () => {
+  mode = "projects";
+  refreshMap();
+  pauseAutoRotate();
+});
 
-const filterTypeSelectEl = document.getElementById("filterTypeSelect");
-if (filterTypeSelectEl) {
-  filterTypeSelectEl.addEventListener("change", e => {
-    filterType = e.target.value;
-    filterValue = "ALL";
-    filterMinAmount = 0;
-    hoveredName = null;
-    buildFilterValueUI();
-    applyFilterToMap();
-    pauseAutoRotate();
-    updateExportVisibility();
-  });
-}
+document.getElementById("btnAmount").addEventListener("click", () => {
+  mode = "amount";
+  refreshMap();
+  pauseAutoRotate();
+});
+
+document.getElementById("filterTypeSelect").addEventListener("change", e => {
+  filterType = e.target.value;
+  filterValue = "ALL";
+  hoveredName = null;
+  buildFilterValueUI();
+  applyFilterToMap();
+  pauseAutoRotate();
+  updateExportVisibility();
+});
 
 window.addEventListener("load", () => {
   const btn = document.getElementById("btnExport");
   if (btn) btn.addEventListener("click", exportMapPNG);
 });
 
+// ─── Stars ────────────────────────────────────────────────────────────────────
+
 (function generateStars() {
   const container = document.getElementById("stars-container");
   if (!container) return;
-
   const count = 220;
+
   for (let i = 0; i < count; i++) {
     const star = document.createElement("div");
     star.className = "star";
-
     const size = Math.random() < 0.8 ? 1 : Math.random() < 0.7 ? 1.5 : 2;
     const x = Math.random() * 100;
     const y = Math.random() * 100;
@@ -1395,37 +874,23 @@ window.addEventListener("load", () => {
       left:${x}%; top:${y}%;
       --duration:${dur}s; --delay:${del}s; --max-opacity:${op};
     `;
+
     container.appendChild(star);
   }
 })();
 
-async function loadExcelRows() {
-  const res = await fetch(EXCEL_URL);
-  if (!res.ok) {
-    throw new Error(`Excel introuvable: ${res.status} ${res.statusText} -> ${EXCEL_URL}`);
-  }
-
-  const buffer = await res.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(sheet, { defval: null, raw: false });
-}
+// ─── Load data ────────────────────────────────────────────────────────────────
 
 Promise.all([
-  fetch(DATA_URL).then(async r => {
-    if (!r.ok) {
-      throw new Error(`GeoJSON introuvable: ${r.status} ${r.statusText} -> ${DATA_URL}`);
-    }
-    return r.json();
-  }),
-  loadExcelRows()
+  fetch(DATA_URL).then(r => r.json()),
+  fetch(STATS_URL).then(r => r.json())
 ])
-  .then(([geojson, rows]) => {
+  .then(([geojson, stats]) => {
     geoFeatures = geojson.features || [];
-    excelRows = rows || [];
+    statsData = stats || null;
 
-    applyFilterToMap();
     buildFilterValueUI();
+    applyFilterToMap();
     updateExportVisibility();
 
     deckgl = new Deck({
@@ -1436,7 +901,6 @@ Promise.all([
       layers: getLayers(),
       onViewStateChange: ({ viewState, interactionState }) => {
         currentViewState = { ...viewState };
-
         if (
           interactionState.isDragging ||
           interactionState.isZooming ||
@@ -1444,7 +908,6 @@ Promise.all([
         ) {
           pauseAutoRotate();
         }
-
         if (deckgl) deckgl.setProps({ viewState: currentViewState });
       }
     });
@@ -1454,7 +917,6 @@ Promise.all([
   })
   .catch(err => {
     console.error("Erreur chargement données :", err);
-
     ["stat-projects", "stat-countries", "stat-amount"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = "—";
