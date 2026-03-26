@@ -1,7 +1,7 @@
 const { Deck, GeoJsonLayer, ScatterplotLayer, _GlobeView } = deck;
 
-const DATA_URL = "./countries.geojson";
-const STATS_URL = "./stats_site.json";
+const DATA_URL = "./countries2.geojson";
+const PROJECTS_URL = "./projects_site.json";
 
 let mode = "projects";
 let hoveredName = null;
@@ -17,10 +17,20 @@ let currentViewState = {
 
 let filterType = "none";
 let filterValue = "ALL";
+let filterMinAmount = 0;
 
 let geoFeatures = [];
-let statsData = null;
+let projectsData = null;
+let projectsRows = [];
 let amountBreaks = [0, 0, 0, 0, 0];
+
+const FILTER_LABELS = {
+  funder: "Tous les bailleurs",
+  responsible: "Tous les responsables",
+  filiale: "Toutes les filiales",
+  sector: "Tous les secteurs",
+  expert: "Tous les experts"
+};
 
 const OFFICE_LOCATIONS = [
   { name: "Paris", coordinates: [2.3522, 48.8566] },
@@ -50,7 +60,47 @@ const PALETTE_BLUE = {
   ]
 };
 
+const PALETTE_ORANGE = {
+  project: [
+    { label: "0", color: [185, 205, 225, 130] },
+    { label: "1", color: [253, 224, 178, 190] },
+    { label: "2–3", color: [253, 187, 99, 200] },
+    { label: "4–5", color: [240, 134, 28, 210] },
+    { label: "6–10", color: [210, 82, 8, 220] },
+    { label: "10+", color: [155, 45, 2, 230] }
+  ],
+  amount: [
+    [185, 205, 225, 110],
+    [253, 224, 178, 190],
+    [253, 187, 99, 200],
+    [240, 134, 28, 210],
+    [210, 82, 8, 220],
+    [155, 45, 2, 230]
+  ]
+};
+
+const PALETTE_GREEN = {
+  project: [
+    { label: "0", color: [185, 205, 225, 130] },
+    { label: "1", color: [198, 239, 210, 190] },
+    { label: "2–3", color: [129, 204, 155, 200] },
+    { label: "4–5", color: [65, 171, 103, 210] },
+    { label: "6–10", color: [30, 130, 65, 220] },
+    { label: "10+", color: [10, 85, 35, 230] }
+  ],
+  amount: [
+    [185, 205, 225, 110],
+    [198, 239, 210, 190],
+    [129, 204, 155, 200],
+    [65, 171, 103, 210],
+    [30, 130, 65, 220],
+    [10, 85, 35, 230]
+  ]
+};
+
 function getActivePalette() {
+  if (filterType === "filiale" && filterValue === "Leader: Urbaconsulting") return PALETTE_ORANGE;
+  if (filterType === "filiale" && filterValue === "Leader: Nexsom") return PALETTE_GREEN;
   return PALETTE_BLUE;
 }
 
@@ -68,50 +118,74 @@ function amountShort(n) {
   return numberFmt(v) + " EUR";
 }
 
-// ─── Helpers stats JSON ───────────────────────────────────────────────────────
+// ─── Helpers projets ──────────────────────────────────────────────────────────
 
-function getCurrentCountryStats() {
-  if (!statsData) return {};
+function getFilterOptions(type) {
+  if (!projectsData?.filters_metadata) return [];
 
-  if (filterType === "none" || filterValue === "ALL") {
-    return statsData.countries_ALL || {};
-  }
+  if (type === "funder") return projectsData.filters_metadata.funders_ordered || [];
+  if (type === "responsible") return projectsData.filters_metadata.responsibles_ordered || [];
+  if (type === "filiale") return projectsData.filters_metadata.filiales_ordered || [];
+  if (type === "sector") return projectsData.filters_metadata.sectors_ordered || [];
+  if (type === "expert") return projectsData.filters_metadata.experts_ordered || [];
 
-  if (filterType === "funder") {
-    return statsData.funders?.[filterValue]?.countries || {};
-  }
-
-  return statsData.countries_ALL || {};
+  return [];
 }
 
-function getCurrentTotals() {
-  if (!statsData) {
-    return { projects: 0, amount: 0 };
-  }
+function getFilteredProjects() {
+  return projectsRows.filter(project => {
+    if (filterType === "none") return true;
 
-  if (filterType === "none" || filterValue === "ALL") {
-    return statsData.totals || { projects: 0, amount: 0 };
-  }
+    if (filterType === "amount") {
+      return Number(project.amount || 0) >= filterMinAmount;
+    }
 
-  if (filterType === "funder") {
-    return statsData.funders?.[filterValue]?.totals || { projects: 0, amount: 0 };
-  }
+    if (filterType === "funder") {
+      return filterValue === "ALL" || (project.funder || "") === filterValue;
+    }
 
-  return statsData.totals || { projects: 0, amount: 0 };
+    if (filterType === "responsible") {
+      return filterValue === "ALL" || (project.responsible || "") === filterValue;
+    }
+
+    if (filterType === "filiale") {
+      return filterValue === "ALL" || (project.filiale || "") === filterValue;
+    }
+
+    if (filterType === "sector") {
+      return filterValue === "ALL" || (project.sectors || []).includes(filterValue);
+    }
+
+    if (filterType === "expert") {
+      return filterValue === "ALL" || (project.experts || []).includes(filterValue);
+    }
+
+    return true;
+  });
 }
 
-function getCurrentNonCountryTotals() {
-  if (!statsData) return {};
+function buildCountryStatsFromProjects(projects) {
+  const stats = {};
 
-  if (filterType === "none" || filterValue === "ALL") {
-    return statsData.non_country_totals || {};
-  }
+  projects.forEach(project => {
+    const countryKeys = Array.isArray(project.country_keys) ? project.country_keys : [];
+    const amount = Number(project.amount || 0);
 
-  if (filterType === "funder") {
-    return statsData.funders?.[filterValue]?.non_country_totals || {};
-  }
+    if (!countryKeys.length) return;
 
-  return statsData.non_country_totals || {};
+    const amountPerCountry = amount / countryKeys.length;
+
+    countryKeys.forEach(key => {
+      if (!stats[key]) {
+        stats[key] = { nb_projets: 0, somme_argent: 0 };
+      }
+
+      stats[key].nb_projets += 1;
+      stats[key].somme_argent += amountPerCountry;
+    });
+  });
+
+  return stats;
 }
 
 // ─── Dynamic filter UI ────────────────────────────────────────────────────────
@@ -126,32 +200,65 @@ function buildFilterValueUI() {
     return;
   }
 
-  if (filterType !== "funder") {
-    wrapper.style.display = "none";
-    wrapper.innerHTML = "";
+  wrapper.style.display = "block";
+
+  if (filterType === "amount") {
+    const maxAmt = Math.max(5000000, ...projectsRows.map(p => Number(p.amount || 0)));
+
+    wrapper.innerHTML = `
+      <div class="amount-slider-wrapper">
+        <div class="amount-slider-label">
+          <span>0 EUR</span>
+          <span>${amountShort(maxAmt)}</span>
+        </div>
+        <input
+          type="range"
+          id="amountSlider"
+          min="0"
+          max="${Math.ceil(maxAmt)}"
+          step="50000"
+          value="${filterMinAmount}"
+        />
+        <div class="amount-slider-value" id="amountSliderLabel">
+          ≥ ${amountShort(filterMinAmount)}
+        </div>
+      </div>
+    `;
+
+    const slider = document.getElementById("amountSlider");
+    if (slider) {
+      slider.addEventListener("input", e => {
+        filterMinAmount = Number(e.target.value);
+        const label = document.getElementById("amountSliderLabel");
+        if (label) label.textContent = "≥ " + amountShort(filterMinAmount);
+        hoveredName = null;
+        applyFilterToMap();
+        pauseAutoRotate();
+      });
+    }
+
     return;
   }
 
-  wrapper.style.display = "block";
+  const values = getFilterOptions(filterType);
 
   const select = document.createElement("select");
   select.id = "filterValueSelect";
 
   const allOpt = document.createElement("option");
   allOpt.value = "ALL";
-  allOpt.textContent = "Tous les bailleurs";
+  allOpt.textContent = FILTER_LABELS[filterType] || "Toutes les valeurs";
   select.appendChild(allOpt);
 
-  const funders = statsData?.funders_ordered_for_filter || [];
-  funders.forEach(({ name, count_rows }) => {
+  values.forEach(item => {
     const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = `${name} (${count_rows})`;
+    opt.value = item.name;
+    opt.textContent = `${item.name} (${item.count_rows})`;
     select.appendChild(opt);
   });
 
-  const funderNames = funders.map(f => f.name);
-  select.value = funderNames.includes(filterValue) ? filterValue : "ALL";
+  const validValues = values.map(v => v.name);
+  select.value = validValues.includes(filterValue) ? filterValue : "ALL";
   filterValue = select.value;
 
   wrapper.innerHTML = "";
@@ -194,11 +301,18 @@ function getAmountColor(v) {
   return palette[5];
 }
 
+function getResponsableColor(v) {
+  if (!v || v <= 0) return [185, 205, 225, 110];
+  return [49, 130, 189, 220];
+}
+
 function getFillColor(props) {
   const isHovered = hoveredName && props.country_name === hoveredName;
   let color;
 
-  if (mode === "projects") {
+  if (filterType === "responsible" && filterValue !== "ALL") {
+    color = getResponsableColor(Number(props.nb_projets || 0));
+  } else if (mode === "projects") {
     color = getProjectColor(Number(props.nb_projets || 0));
   } else {
     color = getAmountColor(Number(props.somme_argent || 0));
@@ -283,9 +397,10 @@ function makeCountriesFillLayer() {
         hoveredName,
         filterType,
         filterValue,
+        filterMinAmount,
         amountBreaks.join("-")
       ],
-      getElevation: [mode, filterType, filterValue]
+      getElevation: [mode, filterType, filterValue, filterMinAmount]
     },
     onHover: info => {
       hoveredName = info.object ? info.object.properties.country_name : null;
@@ -410,6 +525,21 @@ function updateLegend() {
   if (!title || !box) return;
 
   box.innerHTML = "";
+
+  if (filterType === "responsible" && filterValue !== "ALL") {
+    title.textContent = "";
+    const items = [{ label: "Pays d'expérience", color: [49, 130, 189, 220] }];
+    items.forEach(({ label, color }) => {
+      const row = document.createElement("div");
+      row.className = "legend-row";
+      row.innerHTML = `
+        <div class="legend-swatch" style="background:rgba(${color[0]},${color[1]},${color[2]},${color[3] / 255});"></div>
+        <div>${label}</div>`;
+      box.appendChild(row);
+    });
+    return;
+  }
+
   const palette = getActivePalette();
 
   if (mode === "projects") {
@@ -445,19 +575,21 @@ function updateLegend() {
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
-function updateStatsCards(features) {
+function updateStatsCards(filteredProjects, features) {
   const coveredCountries = features.filter(
     f => Number(f.properties.nb_projets || 0) > 0
   ).length;
 
-  const totals = getCurrentTotals();
+  const totalProjects = filteredProjects.length;
+  const totalAmount = filteredProjects.reduce(
+    (sum, p) => sum + Number(p.amount || 0),
+    0
+  );
 
   document.getElementById("stat-countries").textContent = numberFmt(coveredCountries);
-  document.getElementById("stat-projects").textContent = numberFmt(totals.projects || 0);
-
-  const totalAmountMEur = Math.round((totals.amount || 0) / 1000000);
+  document.getElementById("stat-projects").textContent = numberFmt(totalProjects);
   document.getElementById("stat-amount").textContent =
-    totalAmountMEur.toLocaleString("fr-FR") + " M €";
+    Math.round(totalAmount / 1000000).toLocaleString("fr-FR") + " M €";
 }
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
@@ -465,6 +597,7 @@ function updateStatsCards(features) {
 function updateTooltip(info) {
   const tooltip = document.getElementById("tooltip");
   if (!tooltip) return;
+
   if (!info.object) {
     tooltip.style.display = "none";
     return;
@@ -490,26 +623,28 @@ function updateTooltip(info) {
 // ─── Apply filter to map ──────────────────────────────────────────────────────
 
 function applyFilterToMap() {
-  const statsByCountry = getCurrentCountryStats();
+  const filteredProjects = getFilteredProjects();
+  const statsByCountry = buildCountryStatsFromProjects(filteredProjects);
 
   geoFeatures.forEach(f => {
     const key = f.properties.country_key;
-    const stats = statsByCountry[key] || { nb_projets: 0, montant: 0 };
+    const stats = statsByCountry[key] || { nb_projets: 0, somme_argent: 0 };
 
     f.properties.nb_projets = Number(stats.nb_projets || 0);
-    f.properties.somme_argent = Math.round(Number(stats.montant || 0));
+    f.properties.somme_argent = Math.round(Number(stats.somme_argent || 0));
   });
 
   amountBreaks = computeAmountBreaks(
     geoFeatures.map(f => Number(f.properties.somme_argent || 0))
   );
 
-  updateStatsCards(geoFeatures);
+  updateStatsCards(filteredProjects, geoFeatures);
   refreshMap();
 }
 
 function refreshMap() {
   if (!deckgl) return;
+
   deckgl.setProps({ layers: getLayers() });
   updateLegend();
 
@@ -525,7 +660,9 @@ function refreshMap() {
 function updateExportVisibility() {
   const exportPanel = document.getElementById("ui-export");
   if (!exportPanel) return;
-  exportPanel.style.display = "block";
+
+  const hide = filterType === "amount" || (filterType === "responsible" && filterValue !== "ALL");
+  exportPanel.style.display = hide ? "none" : "block";
 }
 
 // ─── Auto-rotate ──────────────────────────────────────────────────────────────
@@ -646,20 +783,38 @@ function exportMapPNG() {
   let mapTitle = "Projets de Global Development";
   if (filterType === "funder" && filterValue !== "ALL") {
     mapTitle = `Projets avec ${filterValue}`;
+  } else if (filterType === "responsible" && filterValue !== "ALL") {
+    mapTitle = `Projets de ${filterValue}`;
+  } else if (filterType === "filiale" && filterValue === "Leader: Hydroconseil") {
+    mapTitle = "Projets de la filiale Hydroconseil";
+  } else if (filterType === "filiale" && filterValue === "Leader: Urbaconsulting") {
+    mapTitle = "Projets de la filiale Urbaconsulting";
+  } else if (filterType === "filiale" && filterValue === "Leader: Nexsom") {
+    mapTitle = "Projets de la filiale Nexsom";
+  } else if (filterType === "sector" && filterValue !== "ALL") {
+    mapTitle = `Projets secteur : ${filterValue}`;
+  } else if (filterType === "expert" && filterValue !== "ALL") {
+    mapTitle = `Projets de l'expert ${filterValue}`;
+  } else if (filterType === "amount" && filterMinAmount > 0) {
+    mapTitle = `Projets ≥ ${amountShort(filterMinAmount)}`;
   }
 
   const COLOR_EMPTY = [208, 218, 228, 110];
 
   function getExportFillColor(props) {
     let color;
-    if (mode === "projects") {
+
+    if (filterType === "responsible" && filterValue !== "ALL") {
+      const v = Number(props.nb_projets || 0);
+      color = v <= 0 ? COLOR_EMPTY : [49, 130, 189, 220];
+    } else if (mode === "projects") {
       const v = Number(props.nb_projets || 0);
       if (!v || v <= 0) color = COLOR_EMPTY;
-      else if (v <= 1) color = [180, 210, 235, 210];
-      else if (v <= 3) color = [130, 180, 220, 220];
-      else if (v <= 5) color = [80, 145, 200, 230];
-      else if (v <= 10) color = [35, 100, 170, 240];
-      else color = [8, 60, 130, 255];
+      else if (v <= 1) color = getActivePalette().project[1].color;
+      else if (v <= 3) color = getActivePalette().project[2].color;
+      else if (v <= 5) color = getActivePalette().project[3].color;
+      else if (v <= 10) color = getActivePalette().project[4].color;
+      else color = getActivePalette().project[5].color;
     } else {
       const v = Number(props.somme_argent || 0);
       const p = getActivePalette().amount;
@@ -670,6 +825,7 @@ function exportMapPNG() {
       else if (v <= amountBreaks[3]) color = p[4];
       else color = p[5];
     }
+
     return color;
   }
 
@@ -685,17 +841,21 @@ function exportMapPNG() {
 
   geoFeatures.forEach(f => {
     const color = getExportFillColor(f.properties);
-    const isEmpty = color[0] === COLOR_EMPTY[0] &&
-                    color[1] === COLOR_EMPTY[1] &&
-                    color[2] === COLOR_EMPTY[2];
+    const isEmpty =
+      color[0] === COLOR_EMPTY[0] &&
+      color[1] === COLOR_EMPTY[1] &&
+      color[2] === COLOR_EMPTY[2];
 
     ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${(color[3] || 255) / 255})`;
     ctx.strokeStyle = isEmpty ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.55)";
     ctx.lineWidth = isEmpty ? 1.5 : 0.4;
 
     const geom = f.geometry;
-    const polys = geom.type === "Polygon" ? [geom.coordinates]
-      : geom.type === "MultiPolygon" ? geom.coordinates : [];
+    const polys = geom.type === "Polygon"
+      ? [geom.coordinates]
+      : geom.type === "MultiPolygon"
+        ? geom.coordinates
+        : [];
 
     polys.forEach(poly => {
       poly.forEach(ring => {
@@ -729,21 +889,27 @@ function exportMapPNG() {
   ctx.textAlign = "center";
   ctx.fillText(mapTitle, centerX, TEXT_TOP + FS_T);
 
-  const palette = getActivePalette();
-  const legendTitle = mode === "projects" ? "Nombre de projets" : "Montant cumulé";
+  const legendTitle =
+    filterType === "responsible" && filterValue !== "ALL"
+      ? "Présence"
+      : mode === "projects"
+        ? "Nombre de projets"
+        : "Montant cumulé";
+
   let legendItems = [];
 
-  if (mode === "projects") {
+  if (filterType === "responsible" && filterValue !== "ALL") {
+    legendItems = [
+      { label: "Aucun projet", color: COLOR_EMPTY },
+      { label: "≥ 1 projet", color: [49, 130, 189, 220] }
+    ];
+  } else if (mode === "projects") {
     legendItems = [
       { label: "0", color: COLOR_EMPTY },
-      { label: "1", color: [180, 210, 235, 210] },
-      { label: "2–3", color: [130, 180, 220, 220] },
-      { label: "4–5", color: [80, 145, 200, 230] },
-      { label: "6–10", color: [35, 100, 170, 240] },
-      { label: "10+", color: [8, 60, 130, 255] }
+      ...getActivePalette().project.slice(1).map(c => ({ label: c.label, color: c.color }))
     ];
   } else {
-    legendItems = palette.amount.map((color, i) => ({
+    legendItems = getActivePalette().amount.map((color, i) => ({
       color,
       label: [
         "0",
@@ -803,16 +969,19 @@ function exportMapPNG() {
         if (status) status.textContent = "canvas vide";
         return;
       }
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = `projet_gd_${new Date().toISOString().slice(0, 10)}.png`;
       document.body.appendChild(link);
       link.click();
+
       setTimeout(() => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       }, 300);
+
       if (status) {
         status.textContent = "Exporté";
         setTimeout(() => { status.style.display = "none"; }, 2500);
@@ -852,6 +1021,7 @@ document.addEventListener("DOMContentLoaded", () => {
     filterTypeSelect.addEventListener("change", e => {
       filterType = e.target.value;
       filterValue = "ALL";
+      filterMinAmount = 0;
       hoveredName = null;
       buildFilterValueUI();
       applyFilterToMap();
@@ -895,17 +1065,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
   Promise.all([
     fetch(DATA_URL).then(r => {
-      if (!r.ok) throw new Error(`countries.geojson introuvable (${r.status})`);
+      if (!r.ok) throw new Error(`countries2.geojson introuvable (${r.status})`);
       return r.json();
     }),
-    fetch(STATS_URL).then(r => {
-      if (!r.ok) throw new Error(`stats_site.json introuvable (${r.status})`);
+    fetch(PROJECTS_URL).then(r => {
+      if (!r.ok) throw new Error(`projects_site.json introuvable (${r.status})`);
       return r.json();
     })
   ])
-    .then(([geojson, stats]) => {
+    .then(([geojson, projectsJson]) => {
       geoFeatures = geojson.features || [];
-      statsData = stats || null;
+      projectsData = projectsJson || null;
+      projectsRows = Array.isArray(projectsJson?.projects) ? projectsJson.projects : [];
 
       buildFilterValueUI();
       applyFilterToMap();
